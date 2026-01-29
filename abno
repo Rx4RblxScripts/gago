@@ -1,0 +1,39 @@
+local InfiniteJumpEnabled = true
+local JumpPower = 28
+local HoldingSpace = false
+
+game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.Space then
+        HoldingSpace = true
+    end
+end)
+
+game:GetService("UserInputService").InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.Space then
+        HoldingSpace = false
+    end
+end)
+
+game:GetService("RunService").RenderStepped:Connect(function()
+    local character = game.Players.LocalPlayer.Character
+    if InfiniteJumpEnabled and HoldingSpace and character then
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.Velocity = Vector3.new(hrp.Velocity.X, JumpPower, hrp.Velocity.Z)
+        end
+    end
+end)
+
+game.Players.LocalPlayer.CharacterAdded:Connect(function(char)
+    local humanoid = char:WaitForChild("Humanoid", 5)
+    if humanoid then
+        humanoid.JumpPower = JumpPower
+    end
+end)
+
+if game.Players.LocalPlayer.Character then
+    local humanoid = game.Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.JumpPower = JumpPower
+    end
+end
