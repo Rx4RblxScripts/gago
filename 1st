@@ -1,0 +1,137 @@
+ 
+local VehicleSection = combat:Section({ Name = "Vehicle Hack", Side = Right/Left})
+
+-- Vehicle Flags
+local VehicleFlags = {
+    Enabled   = false,
+    Instant   = false,
+    MaxSpeed  = 120,
+}
+
+VehicleExpander:Toggle({
+    Name = "Vehicle Hack",
+    Default = false,
+    Callback = function(state)
+        VehicleFlags.Enabled = state
+    end
+})
+
+VehicleExpander:Toggle({
+    Name = "Instant Control (WASD direct)",
+    Default = false,
+    Callback = function(state)
+        VehicleFlags.Instant = state
+    end
+})
+
+VehicleExpander:Slider({
+    Name = "Max Speed",
+    Min = 20,
+    Max = 300,
+    Default = 120,
+    Increment = 5,
+    Callback = function(value)
+        VehicleFlags.MaxSpeed = value
+    end
+})
+
+-- ────────────── VEHICLE HACK LOGIC ──────────────
+do
+    local Players       = game:GetService("Players")
+    local RunService    = game:GetService("RunService")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+    local LocalPlayer = Players.LocalPlayer
+
+    -- Wait for VehicleController (AR2 specific)
+    local VehicleController
+    repeat
+        VehicleController = require(ReplicatedStorage:WaitForChild("Vehicle"):WaitForChild("VehicleController"))
+        task.wait()
+    until VehicleController and VehicleController.Step
+
+    -- Store original upvalue functions
+    local origWheelSpeeds = getupvalue(VehicleController.Step, 2)
+    local origSteerWheels = getupvalue(VehicleController.Step, 3)
+
+    -- Override wheel speeds / throttle
+    setupvalue(VehicleController.Step, 2, function(self, throttle, ...)
+        if not VehicleFlags.Enabled then
+            return origWheelSpeeds(self, throttle, ...)
+        end
+
+        local char = LocalPlayer.Character
+        if not char then return end
+
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if not humanoid then return end
+
+        -- Instant control overrides default throttle
+        throttle = VehicleFlags.Instant and humanoid.MoveDirection.Z or -throttle
+
+        for _, wheel in pairs(self.Wheels:GetChildren()) do
+            local motor = wheel:FindFirstChild("Drive Motor")
+            local part  = wheel.PrimaryPart
+
+            if motor and part then
+                part.CustomPhysicalProperties = PhysicalProperties.new(10, 2, 0, 1, 1)
+                local radius = part.Size.Y / 2
+                motor.AngularVelocity = throttle * (VehicleFlags.MaxSpeed / radius)
+            end
+        end
+    end)
+
+    -- Override steering
+    setupvalue(VehicleController.Step, 3, function(self, steer, throttle, ...)
+        if not VehicleFlags.Enabled then
+            return origSteerWheels(self, steer, throttle, ...)
+        end
+
+        local char = LocalPlayer.Character
+        if not char then return end
+
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if not humanoid then return end
+
+        steer = VehicleFlags.Instant and -humanoid.MoveDirection.X or -steer
+
+        for _, wheel in pairs(self.Wheels:GetChildren()) do
+            local physics = self.Config.Physics.Wheels[wheel.Name]
+            if not physics or not physics.DoesSteer then continue end
+
+            local motor = wheel:FindFirstChild("Drive Motor")
+            if not motor then continue end
+
+            local att = wheel.PrimaryPart:FindFirstChild("Attachment")
+            if not att then continue end
+
+            local angle = math.rad(physics.SteerAngle * steer)
+            angle += math.rad(att.Orientation.Y)
+
+            motor.Attachment0.CFrame = CFrame.Angles(0, angle, 0)
+        end
+    end)
+
+    -- Auto network ownership (helps with high speed / no desync)
+    RunService.Heartbeat:Connect(function()
+        if not VehicleFlags.Enabled then return end
+
+        local char = LocalPlayer.Character
+        if not char then return end
+
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+
+        local seat = hum.SeatPart
+        if not seat then return end
+
+        local vehicleModel = seat.Parent
+        if vehicleModel and vehicleModel:IsA("Model") then
+            pcall(function()
+                vehicleModel:SetNetworkOwner(LocalPlayer)
+            end)
+        end
+    end)
+
+    print("[AR2] Vehicle Hack loaded under Combat tab")
+end
