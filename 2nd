@@ -1,0 +1,124 @@
+-- ────────────── VEHICLE HACK SECTION ──────────────
+local VehicleSection = legit:Section({ Name = "Vehicle Hack" })
+
+VehicleSection:Toggle({
+    Name = "Enable Vehicle Hack",
+    Default = false,
+    Callback = function(state)
+        getgenv().VehicleEnabled = state
+    end
+})
+
+VehicleSection:Toggle({
+    Name = "Instant WASD Control",
+    Default = false,
+    Callback = function(state)
+        getgenv().VehicleInstant = state
+    end
+})
+
+VehicleSection:Slider({
+    Name = "Max Speed",
+    Min = 20,
+    Max = 300,
+    Default = 120,
+    Increment = 5,
+    Callback = function(value)
+        getgenv().VehicleMaxSpeed = value
+    end
+})
+
+-- ────────────── VEHICLE HACK LOGIC ──────────────
+do
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+    local LocalPlayer = Players.LocalPlayer
+
+    local VehicleController
+    local success, err = pcall(function()
+        VehicleController = require(ReplicatedStorage:WaitForChild("Vehicle", 10):WaitForChild("VehicleController", 10))
+    end)
+
+    if not success or not VehicleController or not VehicleController.Step then
+        warn("[AR2 Vehicle Hack] Failed to load VehicleController")
+        return
+    end
+
+    local origWheelSpeeds = getupvalue(VehicleController.Step, 2)
+    local origSteerWheels = getupvalue(VehicleController.Step, 3)
+
+    setupvalue(VehicleController.Step, 2, function(self, throttle, ...)
+        if not getgenv().VehicleEnabled then
+            return origWheelSpeeds(self, throttle, ...)
+        end
+
+        local char = LocalPlayer.Character
+        if not char then return end
+
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+
+        throttle = getgenv().VehicleInstant and hum.MoveDirection.Z or -throttle
+
+        for _, wheel in pairs(self.Wheels:GetChildren()) do
+            local motor = wheel:FindFirstChild("Drive Motor")
+            local part = wheel.PrimaryPart
+            if motor and part then
+                part.CustomPhysicalProperties = PhysicalProperties.new(10, 2, 0, 1, 1)
+                local radius = part.Size.Y / 2
+                motor.AngularVelocity = throttle * (getgenv().VehicleMaxSpeed / radius)
+            end
+        end
+    end)
+
+    setupvalue(VehicleController.Step, 3, function(self, steer, throttle, ...)
+        if not getgenv().VehicleEnabled then
+            return origSteerWheels(self, steer, throttle, ...)
+        end
+
+        local char = LocalPlayer.Character
+        if not char then return end
+
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+
+        steer = getgenv().VehicleInstant and -hum.MoveDirection.X or -steer
+
+        for _, wheel in pairs(self.Wheels:GetChildren()) do
+            local physics = self.Config.Physics.Wheels[wheel.Name]
+            if not physics or not physics.DoesSteer then continue end
+
+            local motor = wheel:FindFirstChild("Drive Motor")
+            if not motor then continue end
+
+            local att = wheel.PrimaryPart:FindFirstChild("Attachment")
+            if not att then continue end
+
+            local angle = math.rad(physics.SteerAngle * steer)
+            angle = angle + math.rad(att.Orientation.Y)
+
+            motor.Attachment0.CFrame = CFrame.Angles(0, angle, 0)
+        end
+    end)
+
+    -- Network ownership fix
+    RunService.Heartbeat:Connect(function()
+        if not getgenv().VehicleEnabled then return end
+        local char = LocalPlayer.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+        local seat = hum.SeatPart
+        if not seat then return end
+        local model = seat.Parent
+        if model and model:IsA("Model") then
+            pcall(function()
+                model:SetNetworkOwner(LocalPlayer)
+            end)
+        end
+    end)
+
+    print("[AR2] Vehicle Hack loaded - check Combat tab")
+end
